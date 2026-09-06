@@ -74,6 +74,9 @@ def plot_rate_by_group(X, y, col, bins=None, labels=None):
     else:
         df["_group"] = df[col]
 
+    if col == config.DEFAULT_GENDER_COL:
+        df["_group"] = df["_group"].map({0: "Male (0)", 1: "Female (1)"})
+
     rates = df.groupby("_group", observed=True)["_target"].agg(["mean", "size"])
 
     fig, ax = plt.subplots(figsize=(6, 4))
