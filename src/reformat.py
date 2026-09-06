@@ -13,7 +13,10 @@ one. That is what lets the same code audit 'Age' here, 'age' in German
 Credit, and 'AGE' somewhere else.
 """
 
+import numpy as np
 import pandas as pd
+
+from src import config
 
 AGE_VARIANTS = [
     "binned_ordinal",
@@ -78,8 +81,14 @@ def reformat_continuous(X, variant, col, n_bins=3):
     )
 
 
-def reformat_categorical(X, variant, col):
-    """Reformat a binary categorical column (e.g. Gender)."""
+def reformat_categorical(X, variant, col, missing_rate=0.15):
+    """
+    Reformat a binary categorical column (e.g. Gender).
+
+    Args:
+        missing_rate: fraction of values blanked out before imputation in
+                      the 'imputed_missing' variant.
+    """
     X = X.copy()
 
     if variant == "baseline":
@@ -102,9 +111,17 @@ def reformat_categorical(X, variant, col):
         return X
 
     if variant == "imputed_missing":
-        # Simulates a self-disclosure field with partial non-response,
-        # filled with the mode.
-        X[col] = X[col].fillna(X[col].mode()[0])
+        # Simulates a self-disclosure field with partial non-response:
+        # blank out a fraction of values, then fill with the mode.
+        #
+        # An earlier version only called fillna, which was a no-op on data
+        # with no missing values — it scored a perfect rho of 1.0 by
+        # comparing an unchanged column against itself. Introducing the
+        # missingness first is what makes the variant test anything.
+        rng = np.random.default_rng(config.RANDOM_SEED)
+        mask = rng.random(len(X)) < missing_rate
+        X.loc[mask, col] = np.nan
+        X[col] = X[col].fillna(X[col].mode()[0]).astype(int)
         return X
 
     raise ValueError(
