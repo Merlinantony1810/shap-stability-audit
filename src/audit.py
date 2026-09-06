@@ -123,3 +123,55 @@ def compare_rankings(baseline_importance, variant_importance, protected_col,
         "magnitude_change_pct": round(float(mag_change) * 100, 1),
         "stable": bool(rho >= threshold),
     }
+
+def run_audit(X_train, X_test, y_train, y_test, protected_col,
+              variants, reformat_fn, random_state=None, **rf_kwargs):
+    """
+    Run the full audit: baseline plus every variant.
+
+    The model is retrained for each variant rather than reused. Reusing
+    the baseline model and only perturbing its input at inference time
+    would test a different question — how a fixed model responds to
+    out-of-distribution input — rather than the intended scenario, where
+    a team encodes a column differently upstream, trains its own model on
+    that encoding, and reads the resulting SHAP output.
+    """
+    # Baseline: same data, same model settings, no reformatting.
+    baseline_model = train_random_forest(
+        X_train, y_train, random_state=random_state, **rf_kwargs
+    )
+    baseline_importance = compute_shap_importance(baseline_model, X_test)
+
+    results = []
+    detail = {"baseline": baseline_importance.to_dict()}
+
+    for variant in variants:
+        X_train_v = reformat_fn(X_train, variant, protected_col)
+        X_test_v = reformat_fn(X_test, variant, protected_col)
+
+        model_v = train_random_forest(
+            X_train_v, y_train, random_state=random_state, **rf_kwargs
+        )
+        importance_v = compute_shap_importance(model_v, X_test_v)
+
+        # One-hot variants produce extra columns; sum them back so the
+        # rankings are the same length and comparable.
+        importance_v = collapse_to_canonical(importance_v, protected_col)
+
+        comparison = compare_rankings(
+            baseline_importance, importance_v, protected_col
+        )
+        comparison["attribute"] = protected_col
+        comparison["variant"] = variant
+
+        results.append(comparison)
+        detail[variant] = importance_v.to_dict()
+
+    results_df = pd.DataFrame(results)
+
+    # Put the identifying columns first for readability.
+    cols = ["attribute", "variant"] + [
+        c for c in results_df.columns if c not in ("attribute", "variant")
+    ]
+
+    return results_df[cols], baseline_importance, detail
