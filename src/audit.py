@@ -67,3 +67,59 @@ def collapse_to_canonical(importance, original_col):
     collapsed[original_col] = total
 
     return collapsed.sort_values(ascending=False)
+
+def compare_rankings(baseline_importance, variant_importance, protected_col,
+                     threshold=None, top_k=None):
+    """
+    Compare a variant's SHAP ranking to the baseline on three metrics.
+
+    Three, not one, because the central hypothesis is that a single
+    aggregate metric can mask exactly the failure an audit exists to
+    catch. The global correlation can pass comfortably while the one
+    attribute under audit is the outlier driving what little
+    disagreement there is.
+    """
+    if threshold is None:
+        threshold = config.STABILITY_THRESHOLD
+    if top_k is None:
+        top_k = config.TOP_K
+
+    # Compare only features present in both, so one-hot variants that
+    # have been canonicalised line up with the baseline.
+    shared = [f for f in baseline_importance.index
+              if f in variant_importance.index]
+
+    # 1. Global rank correlation. Spearman rather than raw magnitude
+    #    because SHAP values are not comparable in scale across
+    #    independently retrained models.
+    rho, p_value = spearmanr(
+        baseline_importance[shared].rank(ascending=False),
+        variant_importance[shared].rank(ascending=False),
+    )
+
+    # 2. Top-k overlap — did the headline features change?
+    baseline_top = set(baseline_importance.index[:top_k])
+    variant_top = set(variant_importance.index[:top_k])
+    overlap = len(baseline_top & variant_top) / top_k
+
+    # 3. The protected attribute's own rank. This is the metric that
+    #    encodes the thesis: it is the one the other two can hide.
+    baseline_rank = list(baseline_importance.index).index(protected_col) + 1
+    variant_rank = list(variant_importance.index).index(protected_col) + 1
+
+    baseline_mag = baseline_importance[protected_col]
+    variant_mag = variant_importance[protected_col]
+    mag_change = (variant_mag - baseline_mag) / baseline_mag
+
+    return {
+        "spearman_rho": round(float(rho), 4),
+        "p_value": round(float(p_value), 6),
+        "top_k_overlap": overlap,
+        "protected_baseline_rank": baseline_rank,
+        "protected_variant_rank": variant_rank,
+        "rank_shift": variant_rank - baseline_rank,
+        "baseline_magnitude": round(float(baseline_mag), 6),
+        "variant_magnitude": round(float(variant_mag), 6),
+        "magnitude_change_pct": round(float(mag_change) * 100, 1),
+        "stable": bool(rho >= threshold),
+    }
