@@ -25,7 +25,7 @@ def main():
     config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     print("Loading data...")
-    X, y = load_dataset(
+    X, y, _ = load_dataset(
         config.RAW_DATA_DIR / "recruitment_data.csv",
         config.DEFAULT_TARGET_COL,
     )
