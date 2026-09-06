@@ -8,6 +8,9 @@ For each variant: reformat the column, retrain an identical model,
 recompute SHAP importance, compare the ranking to the baseline.
 """
 
+import matplotlib
+matplotlib.use("Agg")          # no display needed; write straight to file
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import shap
@@ -68,6 +71,46 @@ def collapse_to_canonical(importance, original_col):
 
     return collapsed.sort_values(ascending=False)
 
+
+def plot_before_after(baseline_importance, variant_importance,
+                      protected_col, variant_name, out_dir):
+    """
+    Before/after SHAP importance for one variant.
+
+    The protected attribute is highlighted in both panels so the rank
+    change is visible at a glance. A table shows the same information,
+    but the collapse is much easier to see than to read.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5), sharex=True)
+
+    for ax, imp, title in [
+        (axes[0], baseline_importance, "Baseline"),
+        (axes[1], variant_importance, f"After: {variant_name}"),
+    ]:
+        imp = imp.sort_values()
+        colors = [
+            "#e74c3c" if f == protected_col else "#bdc3c7"
+            for f in imp.index
+        ]
+        ax.barh(range(len(imp)), imp.values, color=colors)
+        ax.set_yticks(range(len(imp)))
+        ax.set_yticklabels(imp.index, fontsize=9)
+        ax.set_xlabel("Mean |SHAP value|")
+
+        rank = list(imp.index[::-1]).index(protected_col) + 1
+        ax.set_title(f"{title}\n{protected_col} rank {rank} of {len(imp)}")
+
+    fig.suptitle(f"{protected_col} — {variant_name}", fontsize=13, y=1.02)
+    fig.tight_layout()
+
+    path = out_dir / f"{protected_col.lower()}_{variant_name}_before_after.png"
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
 def compare_rankings(baseline_importance, variant_importance, protected_col,
                      threshold=None, top_k=None):
     """
@@ -124,8 +167,10 @@ def compare_rankings(baseline_importance, variant_importance, protected_col,
         "stable": bool(rho >= threshold),
     }
 
+
 def run_audit(X_train, X_test, y_train, y_test, protected_col,
-              variants, reformat_fn, random_state=None, **rf_kwargs):
+              variants, reformat_fn, random_state=None,
+              make_plots=True, **rf_kwargs):
     """
     Run the full audit: baseline plus every variant.
 
@@ -135,6 +180,11 @@ def run_audit(X_train, X_test, y_train, y_test, protected_col,
     out-of-distribution input — rather than the intended scenario, where
     a team encodes a column differently upstream, trains its own model on
     that encoding, and reads the resulting SHAP output.
+
+    Args:
+        make_plots: set False for experiments that run the audit many
+                    times (e.g. seed stability), where per-variant
+                    figures would be overwritten on every repeat.
     """
     # Baseline: same data, same model settings, no reformatting.
     baseline_model = train_random_forest(
@@ -157,6 +207,13 @@ def run_audit(X_train, X_test, y_train, y_test, protected_col,
         # One-hot variants produce extra columns; sum them back so the
         # rankings are the same length and comparable.
         importance_v = collapse_to_canonical(importance_v, protected_col)
+
+        if make_plots:
+            plot_before_after(
+                baseline_importance, importance_v,
+                protected_col, variant,
+                config.FIGURES_DIR / "shap_audit",
+            )
 
         comparison = compare_rankings(
             baseline_importance, importance_v, protected_col
