@@ -2,9 +2,8 @@
 Data loading, validation and automatic encoding.
 
 Takes an arbitrary tabular CSV and prepares it for the audit: resolves
-column names case-insensitively, encodes string columns, encodes the
-target to 0/1, and drops columns that are identifiers rather than
-features.
+column names case-insensitively, drops constant and identifier columns,
+encodes string columns, and encodes the target to 0/1.
 
 What it deliberately does NOT do is guess which column is the protected
 attribute, or untangle a column that encodes two things at once (as
@@ -48,9 +47,18 @@ def encode_features(X, verbose=True):
     transforming their data.
     """
     X = X.copy()
-    report = {"encoded": [], "dropped": [], "numeric": []}
+    report = {"encoded": [], "dropped": [], "constant": [], "numeric": []}
 
     for col in list(X.columns):
+        # A column with one distinct value carries no information. Real
+        # datasets contain these — IBM Attrition has 'Over18' (always
+        # 'Y'), 'EmployeeCount' and 'StandardHours' — and keeping them
+        # just adds useless features to the ranking.
+        if X[col].nunique() <= 1:
+            X = X.drop(columns=[col])
+            report["constant"].append(col)
+            continue
+
         if pd.api.types.is_numeric_dtype(X[col]):
             report["numeric"].append(col)
             continue
@@ -68,6 +76,8 @@ def encode_features(X, verbose=True):
         report["encoded"].append((col, n_unique))
 
     if verbose:
+        for col in report["constant"]:
+            print(f"  dropped '{col}' (constant — one value throughout)")
         for col, n in report["encoded"]:
             print(f"  encoded '{col}' ({n} categories)")
         for col, n in report["dropped"]:
