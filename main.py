@@ -8,7 +8,7 @@ import json
 
 import pandas as pd
 
-from src import config
+from src import config, dashboard
 from src.audit import run_audit
 from src.data_loader import load_dataset
 from src.preprocessing import split, validate
@@ -67,6 +67,10 @@ def main():
     with open(detail_path, "w") as f:
         json.dump(detail, f, indent=2)
 
+    dash_path = dashboard.build(
+        results, {"Age": age_detail, "Gender": gender_detail}
+    )
+
     print(f"\n{'=' * 70}")
     print(results[[
         "attribute", "variant", "spearman_rho",
@@ -74,8 +78,10 @@ def main():
         "magnitude_change_pct", "stable",
     ]].to_string(index=False))
     print(f"{'=' * 70}")
-    print(f"\nMatrix -> {matrix_path}")
-    print(f"Detail -> {detail_path}")
+
+    print(f"\nMatrix    -> {matrix_path}")
+    print(f"Detail    -> {detail_path}")
+    print(f"Dashboard -> {dash_path}")
 
 
 if __name__ == "__main__":
